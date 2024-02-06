@@ -44,5 +44,62 @@ import torch
 
 data = torch.tensor(encode(text), dtype=torch.long)
 print(data.shape, data.dtype)
-print(data[:500]) # first 500 characters again
+print(data[:500]) # first 500 characters again, but this time tokenized
+
+#|%%--%%| <vbi7wpwLzY|EAhfTXPDG8>
+
+# Creating Train and Validation Split
+
+n = int(0.9*len(data)) #first 90% of data
+train_data = data[:n]
+val_data = data[n:]
+
+#|%%--%%| <EAhfTXPDG8|vcTD1LVK0D>
+
+# for training we feed in chunks of text
+# we call this block_size, or context_length
+
+block_size = 8
+train_data[:block_size+1] # block_size+1 because we start off including the first integer (given [15,35,25,...] , from 15, 35 can come next. From 15,35 ,25 comes next. All the way to block_size+1, which gives 8 examples
+
+
+#|%%--%%| <vcTD1LVK0D|7TpihwOfbo>
+# illustration of how nn is trained simultaneously and why we take block_size+1
+# 8 examples in the chunk
+x=train_data[:block_size]
+y=train_data[1:block_size+1]
+for t in range(block_size):
+    context = x[:t+1]
+    target = y[t]
+    print(f"when input is {context} the target: {target}")
+# this also gets the transformer used to seeing a wide range of context (1 character to block size)
+#|%%--%%| <7TpihwOfbo|TNlgVyIuBE>
+
+torch.manual_seed(1337)
+batch_size = 4 # how many independent sequences will we process in parallel?
+block_size = 8 # what is the maximum context length for predictions?
+
+def get_batch(split):
+    # generate a small batch of data of inputs x and targets y
+    data = train_data if split == 'train' else val_data
+    ix = torch.randint(len(data) - block_size, (batch_size,))
+    x = torch.stack([data[i:i+block_size] for i in ix]) #stacks 1D tensors on top of each other
+    y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+    return x, y
+
+xb, yb = get_batch('train')
+print('inputs:')
+print(xb.shape)
+print(xb)
+print('targets:')
+print(yb.shape)
+print(yb)
+
+print('----')
+
+for b in range(batch_size): # batch dimension
+    for t in range(block_size): # time dimension
+        context = xb[b, :t+1]
+        target = yb[b,t]
+        print(f"when input is {context.tolist()} the target: {target}")
 
