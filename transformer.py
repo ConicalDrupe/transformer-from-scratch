@@ -84,7 +84,7 @@ def get_batch(split):
     data = train_data if split == 'train' else val_data
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([data[i:i+block_size] for i in ix]) #stacks 1D tensors on top of each other
-    y = torch.stack([data[i+1:i+block_size+1] for i in ix])
+    y = torch.stack([data[i+1:i+block_size+1] for i in ix]) #moving window target
     return x, y
 
 xb, yb = get_batch('train')
@@ -102,4 +102,88 @@ for b in range(batch_size): # batch dimension
         context = xb[b, :t+1]
         target = yb[b,t]
         print(f"when input is {context.tolist()} the target: {target}")
+
+#|%%--%%| <TNlgVyIuBE|tb1jvHLVOA>
+# A peek at our input for the transformer
+print(xb)
+
+
+#|%%--%%| <tb1jvHLVOA|REOpA3xQUW>
+
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+torch.manual_seed(1337)
+
+class BigramLanguageModel(nn.Module):
+
+    def __init__(self, vocab_size):
+        super().__init__()
+        # each token directly reads off the logits for the next token, from a lookup table
+        self.token_embedding_table = nn.Embedding(vocab_size, vocab_size)
+
+    def forward(self, idx, targets=None):
+        # B - Batch - 4, our batch_size
+        # T - Time - 8, our block_size
+        # C - Channel - 64, our vocab_size
+        # idx - our training input is B by T
+
+        # idx and targets are both (B,T) tensors of integers
+        # logits are the predictions based on the identity of iself "what word follows the letter "I" "
+        logits = self.token_embedding_table(idx) # (B,T,C)
+        
+        if targets is None:
+            loss = None
+        else:
+            # evaluation of predictions and targets via log-loss-likelihood
+            # cross_entropy only accepts BCT instead of BTC
+            B, T, C  = logits.shape #unpack shape into values
+            logits = logits.view(B*T, C)
+            targets = targets.view(B*T)
+            loss = F.cross_entropy(logits, targets) #BCT format
+
+        return logits, loss
+
+    def generate(self, idx, max_new_tokens):
+         # idx is (B, T) arary of indices in the current context
+         for _ in range(max_new_tokens):
+             # get predictions
+             logits, loss = self(idx) #goes to forward function
+             # focus only on the last time step
+             logits = logits[:, -1, :] # becomes (B, C)
+             # apply softmax to get probabilities
+             probs = F.softmax(logits, dim=1) # (B, C)
+             # sample from multinomial distribution
+             idx_next = torch.multinomial(probs, num_samples=1) # (B, 1) because we only want 1 sample
+             # append sampled index to the running sequence
+             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+
+m = BigramLanguageModel(vocab_size)
+logits, loss = m(xb,yb)
+print(logits.shape)
+print(loss)
+
+# create 1x1 tensor of 0 - 0 cooresponds to a newline character
+print(decode(m.generate(idx = torch.zeros((1, 1), dtype=torch.long) , max_new_tokens=100)[0].tolist()))
+
+#|%%--%%| <REOpA3xQUW|fKLJZkHK7B>
+
+optimizer = torch.optim.AdamW(m.parameters(),lr=1e-3)
+
+#|%%--%%| <fKLJZkHK7B|5XU95QcTAr>
+
+batch_size = 32
+for steps in range(100):
+
+    # sample a batch of data
+    xb, yb = get_batch('train')
+
+    # evaluate the loss
+    logits, loss = m(xb, yb)
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    optimizer.step()
+
+    print(loss.item())
+
 
