@@ -146,17 +146,18 @@ class BigramLanguageModel(nn.Module):
 
     def generate(self, idx, max_new_tokens):
          # idx is (B, T) arary of indices in the current context
-         for _ in range(max_new_tokens):
-             # get predictions
-             logits, loss = self(idx) #goes to forward function
-             # focus only on the last time step
-             logits = logits[:, -1, :] # becomes (B, C)
-             # apply softmax to get probabilities
-             probs = F.softmax(logits, dim=1) # (B, C)
-             # sample from multinomial distribution
-             idx_next = torch.multinomial(probs, num_samples=1) # (B, 1) because we only want 1 sample
-             # append sampled index to the running sequence
-             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+        for _ in range(max_new_tokens):
+            # get predictions
+            logits, loss = self(idx) #goes to forward function
+            # focus only on the last time step
+            logits = logits[:, -1, :] # becomes (B, C)
+            # apply softmax to get probabilities
+            probs = F.softmax(logits, dim=1) # (B, C)
+            # sample from multinomial distribution
+            idx_next = torch.multinomial(probs, num_samples=1) # (B, 1) because we only want 1 sample
+            # append sampled index to the running sequence
+            idx = torch.cat((idx, idx_next), dim=1) # (B, T+1)
+        return idx
 
 m = BigramLanguageModel(vocab_size)
 logits, loss = m(xb,yb)
@@ -164,7 +165,9 @@ print(logits.shape)
 print(loss)
 
 # create 1x1 tensor of 0 - 0 cooresponds to a newline character
-print(decode(m.generate(idx = torch.zeros((1, 1), dtype=torch.long) , max_new_tokens=100)[0].tolist()))
+idx = torch.zeros((1, 1), dtype=torch.long)
+# with our tensor of zeros of input, generate an output 100 tokens long. and decode using our elementary tokenizer function above
+print(decode(m.generate(idx=idx, max_new_tokens=100)[0].tolist()))
 
 #|%%--%%| <REOpA3xQUW|fKLJZkHK7B>
 
@@ -173,7 +176,7 @@ optimizer = torch.optim.AdamW(m.parameters(),lr=1e-3)
 #|%%--%%| <fKLJZkHK7B|5XU95QcTAr>
 
 batch_size = 32
-for steps in range(100):
+for steps in range(10000):
 
     # sample a batch of data
     xb, yb = get_batch('train')
@@ -185,5 +188,83 @@ for steps in range(100):
     optimizer.step()
 
     print(loss.item())
+
+
+#|%%--%%| <5XU95QcTAr|sTGgjv4wp9>
+
+# Let's check generation again after training
+# it makes a little more sense
+
+idx = torch.zeros((1, 1), dtype=torch.long)
+print(decode(m.generate(idx=idx, max_new_tokens=100)[0].tolist()))
+
+#|%%--%%| <sTGgjv4wp9|oF57wWITeN>
+r"""°°°
+# The mathematical trick in self-attention, Example
+°°°"""
+#|%%--%%| <oF57wWITeN|X0h6WY9fBJ>
+# Now we want tokens to be coupled, sensically
+# In our past iteration, we predicted characters based ONLY on the last token
+# We want tokens to communicate to the past
+    # or tokens communicate up to the present
+# easiest way to do this is an average on past tokens
+torch.manual_seed(1337)
+B,T,C = 4,8,2 # batch, time, channel
+x = torch.randn(B,T,C)
+x.shape
+
+print(x)
+
+print(x[1, :1])
+
+#|%%--%%| <X0h6WY9fBJ|3pTNIXlOXy>
+# How the hell to slice this?
+xbow = torch.zeros((B,T,C)) #bow stands for bag of words
+for b in range(B):
+    for t in range(T):
+        xprev = x[b, :t+1] # size (t,C)
+        xbow[b,t] = torch.mean(xprev, 0) #average on 0th dimension
+
+
+
+#|%%--%%| <3pTNIXlOXy|ji1h0yr0pg>
+
+# We can better the above method of averaging, by using matrix multiplication
+# using torch.tril, which is a lower triangle matrix
+    # this methods returns itself for the first row, the sum of the previous two for the secord row, and so on
+    # if we normalize this traingular matrix, this is exactly the rolling average that we desire
+
+a = torch.tril(torch.ones(3,3))
+a = a / torch.sum(a, 1, keepdim=True)
+b = torch.randint(0,10,(3,2)).float()
+c = a @ b
+print('a=')
+print(a)
+print('--')
+print('b=')
+print(b)
+print('--')
+print('c=')
+print(c)
+print('--')
+
+
+
+
+#|%%--%%| <ji1h0yr0pg|yi95fBGoGn>
+
+# improved averaging
+# Basically a weighted sum
+wei = torch.tril(torch.ones(T,T))
+wei = wei / wei.sum(1, keepdim=True)
+xbow2 = wei @ x # (T, T) @ (B, T, C) --gets converted to--> (B,T,T) @ (B,T,C) = (B,T,C) 
+
+# another version to do this is using softmax
+# this is useful because we can train these weights
+# they start at zero, but we could chose these 'affinities' to be data dependent
+wei = torch.zeros((T,T))
+wei = wei.masked_fill(tril == 0, float('-inf')) # where tril is 0, fill it with negative infiniti, makes future tokens not communicate with past tokens
+wei = F.softmax(wei, dim=1)
+xbow3 = wei @ x
 
 
